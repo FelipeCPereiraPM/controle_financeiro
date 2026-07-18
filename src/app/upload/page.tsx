@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import * as XLSX from 'xlsx';
 import { UploadCloud, FileSpreadsheet, FileText, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 
 export default function ImportarExtrato() {
@@ -16,12 +17,10 @@ export default function ImportarExtrato() {
   const [message, setMessage] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Acionar seletor de arquivos
   const triggerFileSelect = () => {
     fileInputRef.current?.click();
   };
 
-  // Tratar arquivo selecionado pelo input
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setArquivo(e.target.files[0]);
@@ -30,7 +29,6 @@ export default function ImportarExtrato() {
     }
   };
 
-  // Tratar Drag & Drop
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -46,14 +44,14 @@ export default function ImportarExtrato() {
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
-      
       const ext = droppedFile.name.split('.').pop()?.toLowerCase();
+      
       if (tipoImportacao === 'excel' && !['xlsx', 'xls', 'csv'].includes(ext || '')) {
-        setErrorMsg('Arquivo inválido. Por favor, arraste uma planilha Excel ou CSV.');
+        setErrorMsg('Arquivo inválido. Por favor, selecione uma planilha Excel ou CSV.');
         return;
       }
       if (tipoImportacao === 'pdf' && ext !== 'pdf') {
-        setErrorMsg('Arquivo inválido. Por favor, arraste um extrato em PDF.');
+        setErrorMsg('Arquivo inválido. Por favor, selecione um extrato em PDF.');
         return;
       }
 
@@ -71,7 +69,7 @@ export default function ImportarExtrato() {
   const handleImportacaoReal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!arquivo) {
-      setErrorMsg('Selecione um arquivo de fatura ou extrato antes de prosseguir.');
+      setErrorMsg('Selecione um arquivo antes de prosseguir.');
       return;
     }
 
@@ -80,41 +78,108 @@ export default function ImportarExtrato() {
     setErrorMsg('');
 
     try {
+      // 1. Obter usuário logado para associar no backend
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
 
-      // Dados simulados baseados no arquivo (sem necessidade de chaves estrangeiras de conta/cartão)
-      let payload = [];
+      // ----------------------------------------------------
+      // FLUXO A: Processar Planilha Excel/CSV
+      // ----------------------------------------------------
       if (tipoImportacao === 'excel') {
-        payload = [
-          { data: '2026-07-25', descricao: `Planilha: RESTAURANTE INVESTIDOR`, valor: 89.90, tipo: 'SAIDA' },
-          { data: '2026-07-26', descricao: `Planilha: RECEBIMENTO DIVIDENDOS`, valor: 145.20, tipo: 'ENTRADA' }
-        ];
-      } else {
-        payload = [
-          { data: '2026-07-28', descricao: `PDF: COMPRA COMPROVADA`, valor: 320.00, tipo: 'SAIDA' },
-          { data: '2026-07-29', descricao: `PDF: ABASTECIMENTO POSTO`, valor: 150.00, tipo: 'SAIDA' }
-        ];
+        const reader = new FileReader();
+        
+        reader.onload = async (evt) => {
+          try {
+            const bstr = evt.target?.result;
+            const workbook = XLSX.read(bstr, { type: 'array' });
+            
+            // Ler a primeira aba da planilha
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            
+            // Converter planilha em formato JSON bruto
+            const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+            if (rawJson.length === 0) {
+              throw new Error("A planilha selecionada está vazia.");
+            }
+
+            // Enviar os dados brutos para a nossa API serverless Python
+            const response = await fetch('/api/process_excel', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                user_id: user.id,
+                sheet_name: sheetName,
+                data: rawJson
+              })
+            });
+
+            const result = await response.json();
+            if (!response.ok) {
+              throw new Error(result.error || 'Erro ao processar planilha no servidor.');
+            }
+
+            setMessage(result.message || 'Dados da planilha importados com sucesso!');
+            setArquivo(null);
+          } catch (err: any) {
+            setErrorMsg(err.message || 'Erro ao ler ou enviar planilha.');
+            setLoading(false);
+          }
+        };
+
+        reader.readAsArrayBuffer(arquivo);
+      } 
+      
+      // ----------------------------------------------------
+      // FLUXO B: Processar Extrato/Fatura PDF
+      // ----------------------------------------------------
+      else {
+        // Enviar o arquivo PDF via FormData (Multipart) para a API serverless
+        // Para simplificar a rota serverless sem complexidade de upload físico na nuvem,
+        // convertemos o PDF em Base64 no cliente e enviamos no corpo da requisição JSON.
+        const reader = new FileReader();
+        
+        reader.onload = async (evt) => {
+          try {
+            const base64String = (evt.target?.result as string).split(',')[1];
+            
+            // Em produção, a API process_pdf pode ler o arquivo físico temporário ou processar o payload
+            // Enviaremos os dados para a API process_pdf
+            const response = await fetch('/api/process_pdf', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                user_id: user.id,
+                pdf_data: base64String, // O script em Python receberá e processará decodificando
+                id_cartao: null
+              })
+            });
+
+            const result = await response.json();
+            if (!response.ok) {
+              throw new Error(result.error || 'Erro ao processar PDF no servidor.');
+            }
+
+            setMessage(result.message || 'Lançamentos do PDF importados com sucesso!');
+            setArquivo(null);
+          } catch (err: any) {
+            setErrorMsg(err.message || 'Erro ao ler ou enviar PDF.');
+            setLoading(false);
+          }
+        };
+
+        reader.readAsDataURL(arquivo);
       }
 
-      const formattedData = payload.map(t => ({
-        ...t,
-        user_id: user.id,
-        status: tipoImportacao === 'pdf' ? 'PENDENTE' : 'EFETIVADO',
-        valor: Math.abs(t.valor)
-      }));
-
-      const { data, error } = await supabase.from('transacoes').insert(formattedData).select();
-      if (error) throw error;
-
-      setMessage(`Sucesso! Arquivo "${arquivo.name}" foi processado. ${data.length} transações salvas.`);
-      setArquivo(null);
-      
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao ler arquivo.');
-    } finally {
+      setErrorMsg(err.message || 'Erro inesperado.');
       setLoading(false);
     }
   };
@@ -172,7 +237,7 @@ export default function ImportarExtrato() {
             </div>
           </div>
 
-          {/* Input Oculto */}
+          {/* Seletor Oculto */}
           <input 
             type="file"
             ref={fileInputRef}
@@ -181,7 +246,7 @@ export default function ImportarExtrato() {
             style={{ display: 'none' }}
           />
 
-          {/* Caixa de Upload */}
+          {/* Area Drag & Drop */}
           <div 
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -230,7 +295,6 @@ export default function ImportarExtrato() {
             </div>
           </div>
 
-          {/* Botão Localizar PC */}
           {!arquivo && (
             <button 
               type="button" 
@@ -254,7 +318,6 @@ export default function ImportarExtrato() {
             </button>
           )}
 
-          {/* Remover arquivo */}
           {arquivo && (
             <button 
               type="button" 
@@ -277,7 +340,6 @@ export default function ImportarExtrato() {
             </button>
           )}
 
-          {/* Feedbacks */}
           {message && (
             <div style={{ backgroundColor: 'var(--success-bg)', color: 'var(--success)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <CheckCircle size={16} />
@@ -292,7 +354,6 @@ export default function ImportarExtrato() {
             </div>
           )}
 
-          {/* Confirmar Importação */}
           <button 
             type="submit" 
             disabled={loading || !arquivo} 
