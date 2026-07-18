@@ -65,12 +65,20 @@ export default function Transacoes() {
     if (!descricao || !valor || !data) return;
 
     try {
+      // Obter o usuário logado para associar a transação
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert("Sua sessão expirou. Faça login novamente.");
+        return;
+      }
+
       const novaTransacao = {
         data,
         descricao,
         valor: Math.abs(parseFloat(valor)),
         tipo,
-        status: 'EFETIVADO'
+        status: 'EFETIVADO',
+        user_id: user.id // Associar transação ao ID do usuário autenticado
       };
 
       const { error } = await supabase.from('transacoes').insert([novaTransacao]);
@@ -86,6 +94,7 @@ export default function Transacoes() {
       console.error("Erro ao inserir transação:", err);
     }
   };
+
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>

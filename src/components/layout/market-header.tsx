@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, Sun, Moon } from 'lucide-react';
+import { RefreshCw, Sun, Moon, LogOut } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 interface IndicatorData {
   valor: number;
@@ -17,6 +19,8 @@ interface IndicadoresResponse {
 }
 
 export default function MarketHeader() {
+  const pathname = usePathname();
+  const router = useRouter();
   const [data, setData] = useState<IndicadoresResponse | null>(null);
   const [loading, setLoading] = useState(true);
   
@@ -62,6 +66,11 @@ export default function MarketHeader() {
     carregarIndicadores();
   }, []);
 
+  // Omitir o cabeçalho de indicadores de mercado na tela de login
+  if (pathname === '/login') {
+    return null;
+  }
+
   if (loading || !data) {
     return (
       <div style={{
@@ -98,7 +107,6 @@ export default function MarketHeader() {
       {/* Canto Esquerdo: Botão Alternador de Tema + Indicadores */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
         
-        {/* Botão de Light/Dark Mode no canto esquerdo da barra */}
         <button 
           onClick={toggleTema}
           style={{

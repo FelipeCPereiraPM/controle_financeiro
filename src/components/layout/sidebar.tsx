@@ -1,21 +1,54 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 import { 
   TrendingUp, 
   ArrowLeftRight, 
   UploadCloud, 
-  DollarSign, 
   Menu, 
   ChevronLeft,
-  Briefcase
+  Briefcase,
+  User,
+  LogOut
 } from 'lucide-react';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // Escutar alterações do usuário e obter e-mail logado
+  useEffect(() => {
+    async function checarUsuario() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUserEmail(user.email || null);
+      }
+    }
+    checarUsuario();
+
+    // Escutar mudanças de estado de autenticação (login/logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUserEmail(session.user.email || null);
+      } else {
+        setUserEmail(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Ocultar a sidebar se estivermos na página de login
+  if (pathname === '/login') {
+    return null;
+  }
 
   const menuItems = [
     { label: 'Dashboard', path: '/', icon: TrendingUp },
@@ -139,21 +172,27 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Footer / Usuário */}
-      <div style={{
-        paddingTop: '1rem',
-        borderTop: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: collapsed ? 'center' : 'flex-start',
-        gap: '0.75rem',
-        overflow: 'hidden'
-      }}>
+      {/* Footer / Usuário com Link para Página de Perfil */}
+      <Link 
+        href="/perfil"
+        style={{
+          paddingTop: '1rem',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          gap: '0.75rem',
+          overflow: 'hidden',
+          textDecoration: 'none',
+          color: 'inherit'
+        }}
+      >
         <div style={{
           width: '36px',
           height: '36px',
           borderRadius: '50%',
-          backgroundColor: 'var(--surface-hover)',
+          backgroundColor: pathname === '/perfil' ? 'var(--primary-glow)' : 'var(--surface-hover)',
+          border: pathname === '/perfil' ? '1px solid var(--primary)' : '1px solid transparent',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -163,12 +202,14 @@ export default function Sidebar() {
           👤
         </div>
         {!collapsed && (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>Felipe C.</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Plano Free</span>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flexGrow: 1 }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {userEmail ? userEmail.split('@')[0] : 'Minha Conta'}
+            </span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Meu Perfil</span>
           </div>
         )}
-      </div>
+      </Link>
     </aside>
   );
 }
