@@ -36,10 +36,9 @@ interface AlocacaoGrafico {
   color: string;
 }
 
-// Estrutura para a Matriz do Histórico Mensal
 interface LinhaHistorico {
   ano: number;
-  meses: number[]; // Array de tamanho 12 representando jan-dez
+  meses: number[]; 
   total: number;
   media: number;
 }
@@ -65,32 +64,9 @@ export default function Investimentos() {
   const carregarInvestimentos = async () => {
     try {
       setLoading(true);
-      const carteiraSimulada: Ativo[] = [
-        { id: '1', ticker: 'PETR4', tipo: 'Ações', quantidade: 100, custo_medio: 32.50, cotacao_atual: 37.80 },
-        { id: '2', ticker: 'VALE3', tipo: 'Ações', quantidade: 50, custo_medio: 68.00, cotacao_atual: 61.20 },
-        { id: '3', ticker: 'MXRF11', tipo: 'FIIs', quantidade: 300, custo_medio: 9.80, cotacao_atual: 10.15 },
-        { id: '4', ticker: 'BOVA11', tipo: 'ETFs', quantidade: 15, custo_medio: 112.00, cotacao_atual: 121.50 },
-        { id: '5', ticker: 'BTC', tipo: 'Criptos', quantidade: 0.005, custo_medio: 290000, cotacao_atual: 335000 }
-      ];
-
-      setAtivos(carteiraSimulada);
-
-      // Calcular totais
-      let investido = 0;
-      let atual = 0;
-      carteiraSimulada.forEach(a => {
-        investido += a.quantidade * a.custo_medio;
-        atual += a.quantidade * a.cotacao_atual;
-      });
-
-      setTotalInvestido(investido);
-      setValorAtual(atual);
-
-      // ----------------------------------------------------
-      // Carregar Histórico Mensal de Proventos do Supabase
-      // ----------------------------------------------------
       
-      // 1. Obter UUID da categoria "Investimentos"
+      // Consultar transações reais do usuário logado atreladas ao seu id
+      // e que sejam da categoria 'Investimentos'
       const { data: categoriaInvest } = await supabase
         .from('categorias')
         .select('id')
@@ -99,7 +75,6 @@ export default function Investimentos() {
 
       let transacoesInvest: any[] = [];
       if (categoriaInvest) {
-        // Buscar todas as entradas da categoria de Investimentos (dividendos/proventos)
         const { data: transacoes } = await supabase
           .from('transacoes')
           .select('data, valor, tipo')
@@ -108,41 +83,34 @@ export default function Investimentos() {
         transacoesInvest = transacoes || [];
       }
 
-      // 2. Se a base estiver limpa de proventos, simulamos um histórico rico no frontend
-      // para bater exatamente com a imagem do Investidor10 enviada pelo usuário
+      // IMPORTANTE: Como a carteira deve iniciar zerada para perfis novos,
+      // não criamos dados mockados rígidos se não houver registros salvos no banco.
+      const carteiraUsuario: Ativo[] = []; // Inicia vazia por padrão
+      setAtivos(carteiraUsuario);
+
+      // Calcular totais
+      let investido = 0;
+      let atual = 0;
+      carteiraUsuario.forEach(a => {
+        investido += a.quantidade * a.custo_medio;
+        atual += a.quantidade * a.cotacao_atual;
+      });
+
+      setTotalInvestido(investido);
+      setValorAtual(atual);
+
+      // Processar transações de proventos do usuário (se houver)
       if (transacoesInvest.length === 0) {
-        const anosMock = [2026, 2025, 2024];
-        const proventosMock: LinhaHistorico[] = [
-          {
-            ano: 2026,
-            meses: [51.98, 54.26, 53.73, 80.34, 83.28, 88.29, 67.04, 0.00, 0.00, 0.00, 0.00, 0.00],
-            total: 478.91,
-            media: 68.42
-          },
-          {
-            ano: 2025,
-            meses: [22.50, 34.08, 67.64, 38.79, 43.89, 50.14, 41.79, 63.84, 55.43, 47.93, 55.79, 106.70],
-            total: 628.51,
-            media: 52.38
-          },
-          {
-            ano: 2024,
-            meses: [0.00, 0.00, 3.36, 5.14, 9.13, 10.32, 9.30, 10.04, 13.50, 19.04, 24.20, 55.22],
-            total: 159.27,
-            media: 13.27
-          }
-        ];
-        setHistoricoProventos(proventosMock);
-        setProventosAcumuladosTotal(478.91 + 628.51 + 159.27); // R$ 1.266,69
+        setHistoricoProventos([]);
+        setProventosAcumuladosTotal(0);
       } else {
-        // Processar transações reais do Supabase
         const agrupado: { [key: number]: number[] } = {};
         let acumuladoTotal = 0;
 
         transacoesInvest.forEach(t => {
           const dt = new Date(t.data + 'T00:00:00');
           const anoT = dt.getFullYear();
-          const mesT = dt.getMonth(); // 0-11
+          const mesT = dt.getMonth();
           const val = Number(t.valor);
 
           acumuladoTotal += val;
@@ -153,14 +121,11 @@ export default function Investimentos() {
           agrupado[anoT][mesT] += val;
         });
 
-        // Montar linhas do histórico
         const linhas: LinhaHistorico[] = Object.keys(agrupado)
           .map(anoStr => {
             const a = Number(anoStr);
             const mesesValores = agrupado[a];
             const soma = mesesValores.reduce((acc, curr) => acc + curr, 0);
-            
-            // Calcular média considerando apenas meses com dados ou meses que já passaram
             const mesesPreenchidos = mesesValores.filter(v => v > 0).length || 1;
             const avg = soma / mesesPreenchidos;
 
@@ -171,7 +136,7 @@ export default function Investimentos() {
               media: parseFloat(avg.toFixed(2))
             };
           })
-          .sort((x, y) => y.ano - x.ano); // Mais novos primeiro
+          .sort((x, y) => y.ano - x.ano);
 
         setHistoricoProventos(linhas);
         setProventosAcumuladosTotal(acumuladoTotal);
@@ -400,64 +365,76 @@ export default function Investimentos() {
         
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: '340px' }}>
           <h3 style={{ fontSize: '1.1rem' }}>Distribuição de Ativos (Alocação)</h3>
-          <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-            <div style={{ width: '50%', height: '220px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={dadosAlocacao}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={75}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {dadosAlocacao.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }} />
-                </PieChart>
-              </ResponsiveContainer>
+          {ativos.length === 0 ? (
+            <div style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              Nenhum ativo cadastrado na carteira.
             </div>
-            
-            <div style={{ width: '50%', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {dadosAlocacao.map(d => (
-                <div key={d.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: d.color }} />
-                    <span style={{ color: 'var(--text-secondary)' }}>{d.name}</span>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+              <div style={{ width: '50%', height: '220px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={dadosAlocacao}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={75}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {dadosAlocacao.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              
+              <div style={{ width: '50%', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {dadosAlocacao.map(d => (
+                  <div key={d.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: d.color }} />
+                      <span style={{ color: 'var(--text-secondary)' }}>{d.name}</span>
+                    </div>
+                    <span style={{ fontWeight: 600 }}>
+                      {((d.value / valorAtual) * 100).toFixed(1)}%
+                    </span>
                   </div>
-                  <span style={{ fontWeight: 600 }}>
-                    {((d.value / valorAtual) * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: '340px' }}>
           <h3 style={{ fontSize: '1.1rem' }}>Rentabilidade por Ativo (%)</h3>
-          <div style={{ flexGrow: 1, width: '100%', height: '100%' }}>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={dadosRentabilidadeTicker}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="ticker" stroke="var(--text-secondary)" fontSize={11} />
-                <YAxis stroke="var(--text-secondary)" fontSize={11} />
-                <Tooltip contentStyle={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-primary)' }} />
-                <Bar dataKey="rentabilidade" name="Rentabilidade %">
-                  {dadosRentabilidadeTicker.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={entry.rentabilidade >= 0 ? 'var(--success)' : 'var(--error)'} 
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {ativos.length === 0 ? (
+            <div style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              Nenhum ativo cadastrado na carteira.
+            </div>
+          ) : (
+            <div style={{ flexGrow: 1, width: '100%', height: '100%' }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={dadosRentabilidadeTicker}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="ticker" stroke="var(--text-secondary)" fontSize={11} />
+                  <YAxis stroke="var(--text-secondary)" fontSize={11} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-primary)' }} />
+                  <Bar dataKey="rentabilidade" name="Rentabilidade %">
+                    {dadosRentabilidadeTicker.map((entry, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={entry.rentabilidade >= 0 ? 'var(--success)' : 'var(--error)'} 
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
       </div>
@@ -480,39 +457,45 @@ export default function Investimentos() {
               </tr>
             </thead>
             <tbody>
-              {ativos.map(a => {
-                const totalCusto = a.quantidade * a.custo_medio;
-                const totalAtual = a.quantidade * a.cotacao_atual;
-                const res = totalAtual - totalCusto;
-                const resPct = totalCusto > 0 ? (res / totalCusto) * 100 : 0;
+              {ativos.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                    Nenhum ativo cadastrado. Suas movimentações de investimento aparecerão aqui.
+                  </td>
+                </tr>
+              ) : (
+                ativos.map(a => {
+                  const totalCusto = a.quantidade * a.custo_medio;
+                  const totalAtual = a.quantidade * a.cotacao_atual;
+                  const res = totalAtual - totalCusto;
+                  const resPct = totalCusto > 0 ? (res / totalCusto) * 100 : 0;
 
-                return (
-                  <tr key={a.id}>
-                    <td style={{ fontWeight: 700, color: 'var(--primary)' }}>{a.ticker}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{a.tipo}</td>
-                    <td>{a.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}</td>
-                    <td>R$ {a.custo_medio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td>R$ {a.cotacao_atual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td>R$ {totalCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td style={{ fontWeight: 600 }}>R$ {totalAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td style={{ 
-                      textAlign: 'right', 
-                      fontWeight: 600,
-                      color: res >= 0 ? 'var(--success)' : 'var(--error)'
-                    }}>
-                      R$ {res.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({resPct >= 0 ? '+' : ''}{resPct.toFixed(1)}%)
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr key={a.id}>
+                      <td style={{ fontWeight: 700, color: 'var(--primary)' }}>{a.ticker}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{a.tipo}</td>
+                      <td>{a.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}</td>
+                      <td>R$ {a.custo_medio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                      <td>R$ {a.cotacao_atual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                      <td>R$ {totalCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                      <td style={{ fontWeight: 600 }}>R$ {totalAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                      <td style={{ 
+                        textAlign: 'right', 
+                        fontWeight: 600,
+                        color: res >= 0 ? 'var(--success)' : 'var(--error)'
+                      }}>
+                        R$ {res.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({resPct >= 0 ? '+' : ''}{resPct.toFixed(1)}%)
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ---------------------------------------------------- */}
-      {/* Tabela do Histórico Mensal de Proventos (Investidor10) */}
-      {/* ---------------------------------------------------- */}
+      {/* Histórico Mensal de Proventos */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h2 style={{ fontSize: '1.4rem' }}>Histórico mensal</h2>
@@ -531,7 +514,6 @@ export default function Investimentos() {
         <div className="table-container">
           <table className="table-premium table-wide" style={{ tableLayout: 'fixed' }}>
             <thead>
-
               <tr>
                 <th style={{ width: '80px' }}>Ano</th>
                 <th style={{ textAlign: 'center' }}>Jan</th>
@@ -553,8 +535,8 @@ export default function Investimentos() {
             <tbody>
               {historicoProventos.length === 0 ? (
                 <tr>
-                  <td colSpan={15} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                    Nenhum provento registrado no banco.
+                  <td colSpan={15} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                    Nenhum provento registrado neste perfil.
                   </td>
                 </tr>
               ) : (
