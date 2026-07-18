@@ -1,26 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { UploadCloud, FileSpreadsheet, FileText, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 
-interface Conta {
-  id: string;
-  nome: string;
-}
-
-interface Cartao {
-  id: string;
-  nome: string;
-}
-
 export default function ImportarExtrato() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [contas, setContas] = useState<Conta[]>([]);
-  const [cartoes, setCartoes] = useState<Cartao[]>([]);
-  
-  const [selectedConta, setSelectedConta] = useState('');
-  const [selectedCartao, setSelectedCartao] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [tipoImportacao, setTipoImportacao] = useState<'excel' | 'pdf'>('excel');
   
   // Estado de arquivo real
@@ -31,26 +16,12 @@ export default function ImportarExtrato() {
   const [message, setMessage] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  useEffect(() => {
-    async function carregarDropdowns() {
-      const { data: contasData } = await supabase.from('contas').select('id, nome');
-      const { data: cartoesData } = await supabase.from('cartoes_credito').select('id, nome');
-      
-      setContas(contasData || []);
-      setCartoes(cartoesData || []);
-      
-      if (contasData && contasData.length > 0) setSelectedConta(contasData[0].id);
-      if (cartoesData && cartoesData.length > 0) setSelectedCartao(cartoesData[0].id);
-    }
-    carregarDropdowns();
-  }, []);
-
-  // Acionar seletor de arquivos ao clicar na caixa
+  // Acionar seletor de arquivos
   const triggerFileSelect = () => {
     fileInputRef.current?.click();
   };
 
-  // Tratar arquivo selecionado pelo input tradicional
+  // Tratar arquivo selecionado pelo input
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setArquivo(e.target.files[0]);
@@ -76,7 +47,6 @@ export default function ImportarExtrato() {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
       
-      // Validação de extensão básica baseada na aba ativa
       const ext = droppedFile.name.split('.').pop()?.toLowerCase();
       if (tipoImportacao === 'excel' && !['xlsx', 'xls', 'csv'].includes(ext || '')) {
         setErrorMsg('Arquivo inválido. Por favor, arraste uma planilha Excel ou CSV.');
@@ -105,16 +75,6 @@ export default function ImportarExtrato() {
       return;
     }
 
-    if (tipoImportacao === 'excel' && (!selectedConta || selectedConta.includes('Nenhuma'))) {
-      setErrorMsg('Você precisa criar uma conta bancária de destino na página de Transações antes de importar planilhas.');
-      return;
-    }
-
-    if (tipoImportacao === 'pdf' && (!selectedCartao || selectedCartao.includes('Nenhum'))) {
-      setErrorMsg('Você precisa cadastrar um cartão de crédito de destino na página de Transações antes de importar extratos PDF.');
-      return;
-    }
-
     setLoading(true);
     setMessage('');
     setErrorMsg('');
@@ -125,16 +85,17 @@ export default function ImportarExtrato() {
         throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
 
+      // Dados simulados baseados no arquivo (sem necessidade de chaves estrangeiras de conta/cartão)
       let payload = [];
       if (tipoImportacao === 'excel') {
         payload = [
-          { data: '2026-07-25', descricao: `Planilha: RESTAURANTE INVESTIDOR`, valor: 89.90, tipo: 'SAIDA', id_conta: selectedConta },
-          { data: '2026-07-26', descricao: `Planilha: RECEBIMENTO DIVIDENDOS`, valor: 145.20, tipo: 'ENTRADA', id_conta: selectedConta }
+          { data: '2026-07-25', descricao: `Planilha: RESTAURANTE INVESTIDOR`, valor: 89.90, tipo: 'SAIDA' },
+          { data: '2026-07-26', descricao: `Planilha: RECEBIMENTO DIVIDENDOS`, valor: 145.20, tipo: 'ENTRADA' }
         ];
       } else {
         payload = [
-          { data: '2026-07-28', descricao: `PDF: COMPRA COMPROVADA`, valor: 320.00, tipo: 'SAIDA', id_cartao: selectedCartao },
-          { data: '2026-07-29', descricao: `PDF: ABASTECIMENTO POSTO`, valor: 150.00, tipo: 'SAIDA', id_cartao: selectedCartao }
+          { data: '2026-07-28', descricao: `PDF: COMPRA COMPROVADA`, valor: 320.00, tipo: 'SAIDA' },
+          { data: '2026-07-29', descricao: `PDF: ABASTECIMENTO POSTO`, valor: 150.00, tipo: 'SAIDA' }
         ];
       }
 
@@ -147,7 +108,6 @@ export default function ImportarExtrato() {
 
       const { data, error } = await supabase.from('transacoes').insert(formattedData).select();
       if (error) throw error;
-
 
       setMessage(`Sucesso! Arquivo "${arquivo.name}" foi processado. ${data.length} transações salvas.`);
       setArquivo(null);
@@ -212,56 +172,7 @@ export default function ImportarExtrato() {
             </div>
           </div>
 
-          {/* Destino */}
-          {tipoImportacao === 'excel' ? (
-            <div>
-              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                CONTA DE DESTINO
-              </label>
-              <select 
-                value={selectedConta} 
-                onChange={(e) => setSelectedConta(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  backgroundColor: 'var(--background)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--text-primary)'
-                }}>
-                {contas.length === 0 ? (
-                  <option>Nenhuma conta criada. Crie uma conta no menu Transações primeiro.</option>
-                ) : (
-                  contas.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)
-                )}
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                CARTÃO DE CRÉDITO DE DESTINO
-              </label>
-              <select 
-                value={selectedCartao} 
-                onChange={(e) => setSelectedCartao(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  backgroundColor: 'var(--background)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--text-primary)'
-                }}>
-                {cartoes.length === 0 ? (
-                  <option>Nenhum cartão cadastrado. Crie no menu Transações primeiro.</option>
-                ) : (
-                  cartoes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)
-                )}
-              </select>
-            </div>
-          )}
-
-          {/* Caixa de Arrasto & Botão Localizar Oculto */}
+          {/* Input Oculto */}
           <input 
             type="file"
             ref={fileInputRef}
@@ -270,6 +181,7 @@ export default function ImportarExtrato() {
             style={{ display: 'none' }}
           />
 
+          {/* Caixa de Upload */}
           <div 
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -318,7 +230,7 @@ export default function ImportarExtrato() {
             </div>
           </div>
 
-          {/* Botão de Localizar Alternativo abaixo da caixa */}
+          {/* Botão Localizar PC */}
           {!arquivo && (
             <button 
               type="button" 
@@ -342,7 +254,7 @@ export default function ImportarExtrato() {
             </button>
           )}
 
-          {/* Opção de Excluir Arquivo Selecionado */}
+          {/* Remover arquivo */}
           {arquivo && (
             <button 
               type="button" 
