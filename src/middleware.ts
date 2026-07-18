@@ -1,62 +1,32 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll().map(({ name, value }) => ({ name, value }));
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            request.cookies.set({ name, value, ...options });
-          });
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          });
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set({ name, value, ...options });
-          });
-        },
-      },
-    }
+  // Obter o cookie de autenticação do Supabase
+  // O Supabase armazena a sessão sob um cookie com prefixo sb-
+  const allCookies = request.cookies.getAll();
+  const hasSession = allCookies.some(cookie => 
+    cookie.name.includes('sb-') && cookie.name.includes('-auth-token')
   );
-
-  // Obter sessão atual
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
   const isLoginPage = request.nextUrl.pathname === '/login';
 
-  // Se o usuário não está autenticado e tenta acessar qualquer página interna
-  if (!user && !isLoginPage) {
+  // Se o usuário não tem sessão ativa e tenta acessar qualquer página interna
+  if (!hasSession && !isLoginPage) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Se o usuário está autenticado e tenta acessar a página de login
-  if (user && isLoginPage) {
+  // Se o usuário tem sessão ativa e tenta entrar na tela de login, manda de volta para home
+  if (hasSession && isLoginPage) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 // Configurar rotas que passam pelo middleware (todas exceto recursos estáticos)
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
