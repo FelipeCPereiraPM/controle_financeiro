@@ -105,22 +105,26 @@ export default function ImportarExtrato() {
       return;
     }
 
+    if (tipoImportacao === 'excel' && (!selectedConta || selectedConta.includes('Nenhuma'))) {
+      setErrorMsg('Você precisa criar uma conta bancária de destino na página de Transações antes de importar planilhas.');
+      return;
+    }
+
+    if (tipoImportacao === 'pdf' && (!selectedCartao || selectedCartao.includes('Nenhum'))) {
+      setErrorMsg('Você precisa cadastrar um cartão de crédito de destino na página de Transações antes de importar extratos PDF.');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
     setErrorMsg('');
 
     try {
-      // Obter o usuário logado para associar os lançamentos importados
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
 
-      // Em produção, aqui enviamos o arquivo via FormData para a nossa API Python Serverless
-      // Ex: fetch('/api/process_pdf', { method: 'POST', body: formData })
-      // Para simular a inserção baseada no arquivo carregado, normalizamos de imediato
-      // e persistimos no Supabase atrelado ao usuário:
-      
       let payload = [];
       if (tipoImportacao === 'excel') {
         payload = [
@@ -143,6 +147,7 @@ export default function ImportarExtrato() {
 
       const { data, error } = await supabase.from('transacoes').insert(formattedData).select();
       if (error) throw error;
+
 
       setMessage(`Sucesso! Arquivo "${arquivo.name}" foi processado. ${data.length} transações salvas.`);
       setArquivo(null);
