@@ -44,13 +44,12 @@ export default function Login() {
         if (error) throw error;
 
         if (data.user) {
-          // Checar se o usuário foi criado e requer confirmação
           const { session } = data;
           if (!session) {
             setMsg('Cadastro realizado! Enviamos um link de ativação para o seu e-mail. Por favor, clique no link para validar sua conta antes de fazer o primeiro login.');
           } else {
             setMsg('Conta criada com sucesso! Redirecionando...');
-            router.push('/');
+            window.location.href = '/';
           }
         }
       } else {
@@ -64,9 +63,10 @@ export default function Login() {
 
         if (data.session) {
           setMsg('Login efetuado com sucesso! Entrando...');
-          router.push('/');
+          window.location.href = '/';
         }
       }
+
     } catch (err: any) {
       if (err.message.includes('confirm')) {
         setErrorMsg('Por favor, ative sua conta clicando no link enviado para o seu e-mail.');
