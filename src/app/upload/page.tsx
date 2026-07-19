@@ -136,8 +136,11 @@ export default function ImportarExtrato() {
               for (const row of rawJson) {
                 const descLinha = String(row[colunaDescricao]).trim();
 
-                // Pular cabeçalhos ou totais
-                if (!descLinha || ['TOTAL', '% SOBRE RECEITA', 'RECEITAS/DESPESAS', 'DESPESA', 'RECEITA', 'NAN'].includes(descLinha.toUpperCase())) {
+                // Pular cabeçalhos, totais ou linhas de agrupamento para evitar duplicidade de valores
+                if (!descLinha || [
+                  'TOTAL', '% SOBRE RECEITA', 'RECEITAS/DESPESAS', 'DESPESA', 'RECEITA', 'NAN',
+                  'BALANÇO', 'DESPESAS FIXAS', 'DESPESAS VARIÁVEIS', 'INVESTIMENTOS'
+                ].includes(descLinha.toUpperCase())) {
                   continue;
                 }
 
@@ -146,6 +149,7 @@ export default function ImportarExtrato() {
                 if (['salário', 'adiantamento', '13º salário', 'férias', 'fiis', 'ações (bitcoin)', 'ações', 'tesouro selic', 'renda fixa', 'rendimentos'].includes(descLinha.toLowerCase())) {
                   tipo = 'ENTRADA';
                 }
+
 
                 for (const mesNome of mesesPresentes) {
                   let valorCelula = row[mesNome];
