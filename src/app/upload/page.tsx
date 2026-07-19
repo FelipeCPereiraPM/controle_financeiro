@@ -9,7 +9,6 @@ export default function ImportarExtrato() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [tipoImportacao, setTipoImportacao] = useState<'excel' | 'pdf'>('excel');
   
-  // Estado de arquivo real
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -78,14 +77,14 @@ export default function ImportarExtrato() {
     setErrorMsg('');
 
     try {
-      // 1. Obter usuário logado para associar no backend
+      // 1. Obter usuário logado para associar no backend com segurança via RLS
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
 
       // ----------------------------------------------------
-      // FLUXO A: Processar Planilha Excel/CSV
+      // FLUXO A: Processar Planilha Excel/CSV no Cliente
       // ----------------------------------------------------
       if (tipoImportacao === 'excel') {
         const reader = new FileReader();
@@ -95,39 +94,147 @@ export default function ImportarExtrato() {
             const bstr = evt.target?.result;
             const workbook = XLSX.read(bstr, { type: 'array' });
             
-            // Ler a primeira aba da planilha
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
             
-            // Converter planilha em formato JSON bruto
-            const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+            // Ler dados brutos como matriz de objetos
+            const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as any[];
 
             if (rawJson.length === 0) {
               throw new Error("A planilha selecionada está vazia.");
             }
 
-            // Enviar os dados brutos para a nossa API serverless Python
-            const response = await fetch('/api/process_excel', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                user_id: user.id,
-                sheet_name: sheetName,
-                data: rawJson
-              })
-            });
-
-            const result = await response.json();
-            if (!response.ok) {
-              throw new Error(result.error || 'Erro ao processar planilha no servidor.');
+            // Inferir ano de referência pelo nome da aba (Ex: Controle25 -> 2025, Controle26 -> 2026)
+            let anoReferencia = 2026;
+            const matchAno = sheetName.match(/\d{2,4}/);
+            if (matchAno) {
+              const anoStr = matchAno[0];
+              anoReferencia = parseInt(anoStr.length === 2 ? `20${anoStr}` : anoStr);
             }
 
-            setMessage(result.message || 'Dados da planilha importados com sucesso!');
+            const colunasMeses = [
+              'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+            ];
+
+            const mesesMap: { [key: string]: number } = {
+              'Janeiro': 1, 'Fevereiro': 2, 'Março': 3, 'Abril': 4, 'Maio': 5, 'Junho': 6,
+              'Julho': 7, 'Agosto': 8, 'Setembro': 9, 'Outubro': 10, 'Novembro': 11, 'Dezembro': 12
+            };
+
+            const transactionsToInsert: any[] = [];
+            const primeiraLinha = rawJson[0] || {};
+            const colunasPlanilha = Object.keys(primeiraLinha);
+
+            // Detecção automática de Matriz Orçamentária Horizontal vs. Extrato Vertical
+            const mesesPresentes = colunasMeses.filter(col => colunasPlanilha.includes(col));
+
+            if (mesesPresentes.length > 0) {
+              // --- MODO 1: ORÇAMENTO HORIZONTAL ---
+              const colunaDescricao = colunasPlanilha[0];
+
+              for (const row of rawJson) {
+                const descLinha = String(row[colunaDescricao]).trim();
+
+                // Pular cabeçalhos ou totais
+                if (!descLinha || ['TOTAL', '% SOBRE RECEITA', 'RECEITAS/DESPESAS', 'DESPESA', 'RECEITA', 'NAN'].includes(descLinha.toUpperCase())) {
+                  continue;
+                }
+
+                // Definir Entrada/Saída básico baseado em categorias comuns
+                let tipo: 'ENTRADA' | 'SAIDA' = 'SAIDA';
+                if (['salário', 'adiantamento', '13º salário', 'férias', 'fiis', 'ações (bitcoin)', 'ações', 'tesouro selic', 'renda fixa', 'rendimentos'].includes(descLinha.toLowerCase())) {
+                  tipo = 'ENTRADA';
+                }
+
+                for (const mesNome of mesesPresentes) {
+                  let valorCelula = row[mesNome];
+
+                  if (!valorCelula || valorCelula === '-' || valorCelula === 'R$ 0,00' || valorCelula === 0 || valorCelula === '0') {
+                    continue;
+                  }
+
+                  // Limpar string financeira brasileira
+                  if (typeof valorCelula === 'string') {
+                    valorCelula = valorCelula.replace('R$', '').replace(/\./g, '').replace(',', '.').replace(/\s/g, '').trim();
+                  }
+
+                  const valorFinal = Math.abs(parseFloat(valorCelula));
+                  if (isNaN(valorFinal) || valorFinal === 0) continue;
+
+                  const numMes = mesesMap[mesNome];
+                  const dataTransacao = `${anoReferencia}-${String(numMes).padStart(2, '0')}-01`;
+
+                  transactionsToInsert.push({
+                    data: dataTransacao,
+                    descricao: `Planilha: ${descLinha}`,
+                    valor: valorFinal,
+                    tipo,
+                    status: 'EFETIVADO',
+                    user_id: user.id
+                  });
+                }
+              }
+            } else {
+              // --- MODO 2: EXTRATO VERTICAL TRADICIONAL ---
+              // Procurar mapeamento de chaves
+              const keyData = colunasPlanilha.find(k => k.toLowerCase().includes('dat'));
+              const keyDesc = colunasPlanilha.find(k => k.toLowerCase().includes('desc') || k.toLowerCase().includes('hist'));
+              const keyVal = colunasPlanilha.find(k => k.toLowerCase().includes('val') || k.toLowerCase().includes('pago'));
+
+              if (!keyData || !keyDesc || !keyVal) {
+                throw new Error("Colunas necessárias (data, descrição, valor) não foram identificadas na planilha.");
+              }
+
+              for (const row of rawJson) {
+                let valorRaw = row[keyVal];
+                if (!valorRaw) continue;
+
+                if (typeof valorRaw === 'string') {
+                  valorRaw = valorRaw.replace('R$', '').replace(/\./g, '').replace(',', '.').trim();
+                }
+
+                const valorNum = parseFloat(valorRaw);
+                if (isNaN(valorNum) || valorNum === 0) continue;
+
+                const tipo: 'ENTRADA' | 'SAIDA' = valorNum > 0 ? 'ENTRADA' : 'SAIDA';
+                
+                // Formatar Data
+                let dataFmt = String(row[keyData]).trim();
+                if (dataFmt.includes('/')) {
+                  const partes = dataFmt.split('/');
+                  if (partes.length === 3) {
+                    dataFmt = `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}`;
+                  }
+                }
+
+                transactionsToInsert.push({
+                  data: dataFmt,
+                  descricao: String(row[keyDesc]).trim(),
+                  valor: Math.abs(valorNum),
+                  tipo,
+                  status: 'EFETIVADO',
+                  user_id: user.id
+                });
+              }
+            }
+
+            if (transactionsToInsert.length === 0) {
+              throw new Error("Nenhum lançamento válido foi extraído da planilha.");
+            }
+
+            // Inserir diretamente pelo Supabase Client (respeitando o RLS)
+            const { data: insertRes, error: insertErr } = await supabase
+              .from('transacoes')
+              .insert(transactionsToInsert)
+              .select();
+
+            if (insertErr) throw insertErr;
+
+            setMessage(`Sucesso! Planilha processada e ${insertRes.length} lançamentos foram importados.`);
             setArquivo(null);
           } catch (err: any) {
-            setErrorMsg(err.message || 'Erro ao ler ou enviar planilha.');
+            setErrorMsg(err.message || 'Erro ao processar conteúdo da planilha.');
             setLoading(false);
           }
         };
@@ -139,17 +246,12 @@ export default function ImportarExtrato() {
       // FLUXO B: Processar Extrato/Fatura PDF
       // ----------------------------------------------------
       else {
-        // Enviar o arquivo PDF via FormData (Multipart) para a API serverless
-        // Para simplificar a rota serverless sem complexidade de upload físico na nuvem,
-        // convertemos o PDF em Base64 no cliente e enviamos no corpo da requisição JSON.
         const reader = new FileReader();
         
         reader.onload = async (evt) => {
           try {
             const base64String = (evt.target?.result as string).split(',')[1];
             
-            // Em produção, a API process_pdf pode ler o arquivo físico temporário ou processar o payload
-            // Enviaremos os dados para a API process_pdf
             const response = await fetch('/api/process_pdf', {
               method: 'POST',
               headers: {
@@ -157,7 +259,7 @@ export default function ImportarExtrato() {
               },
               body: JSON.stringify({
                 user_id: user.id,
-                pdf_data: base64String, // O script em Python receberá e processará decodificando
+                pdf_data: base64String,
                 id_cartao: null
               })
             });
@@ -170,7 +272,7 @@ export default function ImportarExtrato() {
             setMessage(result.message || 'Lançamentos do PDF importados com sucesso!');
             setArquivo(null);
           } catch (err: any) {
-            setErrorMsg(err.message || 'Erro ao ler ou enviar PDF.');
+            setErrorMsg(err.message || 'Erro ao enviar PDF.');
             setLoading(false);
           }
         };
@@ -237,7 +339,6 @@ export default function ImportarExtrato() {
             </div>
           </div>
 
-          {/* Seletor Oculto */}
           <input 
             type="file"
             ref={fileInputRef}
